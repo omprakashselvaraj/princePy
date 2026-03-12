@@ -1,0 +1,131 @@
+1️⃣ Setup MLflow Registry and Experiment
+Python
+Copy code
+import mlflow
+import mlflow.catboost
+
+# Use Workspace Model Registry
+mlflow.set_registry_uri("databricks")
+
+# Set experiment path
+mlflow.set_experiment("/Shared/payment_integrity_experiment")
+2️⃣ Load Data (Example)
+Python
+Copy code
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+df = spark.table("claims_features").toPandas()
+
+X = df.drop("target", axis=1)
+y = df["target"]
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+3️⃣ Train CatBoost Model
+Python
+Copy code
+from catboost import CatBoostClassifier
+
+model = CatBoostClassifier(
+    iterations=200,
+    depth=6,
+    learning_rate=0.1,
+    loss_function="Logloss",
+    verbose=False
+)
+
+model.fit(X_train, y_train)
+4️⃣ Evaluate Model
+Python
+Copy code
+from sklearn.metrics import accuracy_score
+
+preds = model.predict(X_test)
+accuracy = accuracy_score(y_test, preds)
+5️⃣ Log Model to MLflow + Register
+Python
+Copy code
+with mlflow.start_run():
+
+    mlflow.log_param("iterations", 200)
+    mlflow.log_param("depth", 6)
+    mlflow.log_metric("accuracy", accuracy)
+
+    mlflow.catboost.log_model(
+        model,
+        artifact_path="model",
+        registered_model_name="payment_integrity_catboost"
+    )
+This will:
+log run
+store artifacts
+create model in Model Registry
+6️⃣ Promote Model to Staging
+Python
+Copy code
+from mlflow.tracking import MlflowClient
+
+client = MlflowClient()
+
+latest_version = client.get_latest_versions(
+    "payment_integrity_catboost"
+)[0].version
+
+client.transition_model_version_stage(
+    name="payment_integrity_catboost",
+    version=latest_version,
+    stage="Staging"
+)
+7️⃣ Promote to Production
+Python
+Copy code
+client.transition_model_version_stage(
+    name="payment_integrity_catboost",
+    version=latest_version,
+    stage="Production"
+)
+8️⃣ Load Production Model for Inference
+Python
+Copy code
+model = mlflow.pyfunc.load_model(
+    "models:/payment_integrity_catboost/Production"
+)
+
+predictions = model.predict(X_test)
+9️⃣ Recommended Databricks Job Pipeline
+Structure your Databricks Job tasks like this:
+Copy code
+
+Task 1 → Feature ETL (Spark)
+Task 2 → Train Model
+Task 3 → Evaluate Model
+Task 4 → Register Model
+Task 5 → Promote Model
+This keeps training reproducible and MLflow lineage clean.
+🔟 Good Practice for Your Environments
+Since you previously said you use:
+Copy code
+
+mldev
+mlstg
+liv
+prod
+Recommended flow:
+Copy code
+
+mldev  → Train + Register
+mlstg  → Stage validation
+prod   → Production promotion
+MLflow stages map well:
+Copy code
+
+None → Dev
+Staging → QA
+Production → Live
+✅ If you want, I can also show a much better architecture for Databricks that reduces ML training cost (you mentioned earlier billing is high) using:
+single training environment
+model promotion without retraining
+MLflow registry based deployment
+This approach can reduce
